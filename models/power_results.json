@@ -1,0 +1,358 @@
+{
+  "features": [
+    "wind_speed",
+    "wind_dir_sin",
+    "wind_dir_cos",
+    "air_density"
+  ],
+  "cleaning": {
+    "rows_raw": 50530,
+    "Negative power clipped to 0": 57,
+    "Out-of-range wind speed (<0 or >40 m/s) or direction": 0,
+    "Downtime: wind above cut-in but zero output": 2220,
+    "Derating, icing or curtailment: outside 1.5 IQR of its wind-speed bin": 2140,
+    "rows_clean": 46170,
+    "rows_merged": 46170
+  },
+  "split": {
+    "train": {
+      "rows": 31437,
+      "start": "2018-01-01 00:00:00",
+      "end": "2018-08-31 23:50:00"
+    },
+    "val": {
+      "rows": 7910,
+      "start": "2018-09-01 00:00:00",
+      "end": "2018-10-31 23:50:00"
+    },
+    "test": {
+      "rows": 6823,
+      "start": "2018-11-01 00:00:00",
+      "end": "2018-12-31 23:50:00"
+    }
+  },
+  "training_range": {
+    "wind_speed": [
+      0.0,
+      25.2060108184814
+    ],
+    "wind_dir_sin": [
+      -0.9999999959005772,
+      0.9999999990578066
+    ],
+    "wind_dir_cos": [
+      -0.9999999999858151,
+      1.0
+    ],
+    "temperature_c": [
+      -3.3266666666666667,
+      33.53
+    ],
+    "pressure_kpa": [
+      95.61,
+      99.68
+    ],
+    "humidity_pct": [
+      27.66,
+      100.0
+    ],
+    "air_density": [
+      1.093884418256963,
+      1.271103952735294
+    ]
+  },
+  "ablation": [
+    {
+      "feature_set": "Wind speed only",
+      "features": [
+        "wind_speed"
+      ],
+      "val": {
+        "mae": 61.954531640067145,
+        "rmse": 97.10292128308876,
+        "r2": 0.9940850716525027
+      },
+      "test": {
+        "mae": 77.81173694939615,
+        "rmse": 119.47811048357748,
+        "r2": 0.9924340825504759
+      }
+    },
+    {
+      "feature_set": "+ wind direction",
+      "features": [
+        "wind_speed",
+        "wind_dir_sin",
+        "wind_dir_cos"
+      ],
+      "val": {
+        "mae": 59.40157204366414,
+        "rmse": 92.46514544437916,
+        "r2": 0.9946365898308296
+      },
+      "test": {
+        "mae": 72.39893567984325,
+        "rmse": 108.71690761696023,
+        "r2": 0.9937356056620722
+      }
+    },
+    {
+      "feature_set": "+ air density",
+      "features": [
+        "wind_speed",
+        "wind_dir_sin",
+        "wind_dir_cos",
+        "air_density"
+      ],
+      "val": {
+        "mae": 59.92190213773453,
+        "rmse": 90.44071339817862,
+        "r2": 0.9948688719167065
+      },
+      "test": {
+        "mae": 64.4162425326407,
+        "rmse": 95.41345493413952,
+        "r2": 0.9951749240813663
+      }
+    },
+    {
+      "feature_set": "+ temperature, pressure, humidity",
+      "features": [
+        "wind_speed",
+        "wind_dir_sin",
+        "wind_dir_cos",
+        "temperature_c",
+        "pressure_kpa",
+        "humidity_pct"
+      ],
+      "val": {
+        "mae": 61.4408678546893,
+        "rmse": 96.00525608627265,
+        "r2": 0.9942180421997445
+      },
+      "test": {
+        "mae": 62.43235716632996,
+        "rmse": 95.54257748500004,
+        "r2": 0.9951618557425204
+      }
+    },
+    {
+      "feature_set": "All (report feature set)",
+      "features": [
+        "wind_speed",
+        "wind_dir_sin",
+        "wind_dir_cos",
+        "temperature_c",
+        "pressure_kpa",
+        "humidity_pct",
+        "air_density"
+      ],
+      "val": {
+        "mae": 61.92431642803813,
+        "rmse": 95.07748349700624,
+        "r2": 0.9943292532374943
+      },
+      "test": {
+        "mae": 64.1010411678827,
+        "rmse": 95.96659472969814,
+        "r2": 0.9951188171554076
+      }
+    }
+  ],
+  "tuning": [
+    {
+      "method": "Grid",
+      "trials": 27,
+      "seconds": 5.61590059986338,
+      "best_val_rmse": 87.28547041312062,
+      "test": {
+        "mae": 66.2434886717151,
+        "rmse": 95.60587406052873,
+        "r2": 0.9951554431166066
+      },
+      "params": {
+        "max_depth": 3,
+        "learning_rate": 0.03,
+        "min_child_weight": 50.0,
+        "subsample": 0.8
+      }
+    },
+    {
+      "method": "Random",
+      "trials": 30,
+      "seconds": 47.95138079999015,
+      "best_val_rmse": 92.31563414149501,
+      "test": {
+        "mae": 71.92109040509119,
+        "rmse": 100.4601698941592,
+        "r2": 0.9946509984519699
+      },
+      "params": {
+        "max_depth": 2,
+        "learning_rate": 0.0444914614461489,
+        "min_child_weight": 52.14297905300547,
+        "subsample": 0.8486840145296819,
+        "colsample_bytree": 0.5470886739438248,
+        "reg_lambda": 7.988944545350396,
+        "reg_alpha": 1.1080485964481517
+      }
+    },
+    {
+      "method": "Bayesian",
+      "trials": 30,
+      "seconds": 31.203579899854958,
+      "best_val_rmse": 91.76425180570709,
+      "test": {
+        "mae": 70.3753945089079,
+        "rmse": 99.32104226164238,
+        "r2": 0.9947716164005208
+      },
+      "params": {
+        "max_depth": 2,
+        "learning_rate": 0.10492501131300569,
+        "min_child_weight": 2.230781736103445,
+        "subsample": 0.6760878975801587,
+        "colsample_bytree": 0.6059591532973205,
+        "reg_lambda": 0.030410616376897237,
+        "reg_alpha": 0.0021380354035467715
+      }
+    }
+  ],
+  "best_method": "Grid",
+  "params": {
+    "max_depth": 3,
+    "learning_rate": 0.03,
+    "min_child_weight": 50.0,
+    "subsample": 0.8
+  },
+  "comparison": [
+    {
+      "model": "Linear Regression",
+      "role": "Baseline",
+      "val": {
+        "mae": 301.94412162788274,
+        "rmse": 367.24860647958405,
+        "r2": 0.9153932116014989
+      },
+      "test": {
+        "mae": 332.61639694216205,
+        "rmse": 419.5487633672742,
+        "r2": 0.9067068412780708
+      }
+    },
+    {
+      "model": "K-Nearest Neighbors (k=25)",
+      "role": "Baseline",
+      "val": {
+        "mae": 83.42330168009222,
+        "rmse": 131.77726078425277,
+        "r2": 0.9891065398672814
+      },
+      "test": {
+        "mae": 95.49614676831412,
+        "rmse": 147.10657008065542,
+        "r2": 0.9885303795572062
+      }
+    },
+    {
+      "model": "Random Forest",
+      "role": "Baseline",
+      "val": {
+        "mae": 68.88604044307992,
+        "rmse": 98.39342768144142,
+        "r2": 0.993926807079633
+      },
+      "test": {
+        "mae": 76.16894962244947,
+        "rmse": 105.50572957811778,
+        "r2": 0.9941002039738994
+      }
+    },
+    {
+      "model": "LightGBM",
+      "role": "Comparison",
+      "val": {
+        "mae": 63.806190996209786,
+        "rmse": 97.27672880659254,
+        "r2": 0.9940638780753882
+      },
+      "test": {
+        "mae": 67.22120298608647,
+        "rmse": 100.37187506249667,
+        "r2": 0.9946603968362917
+      }
+    },
+    {
+      "model": "XGBoost (default)",
+      "role": "Primary, untuned",
+      "val": {
+        "mae": 60.0172750156196,
+        "rmse": 91.20068540197376,
+        "r2": 0.9947822760170818
+      },
+      "test": {
+        "mae": 64.6298741103442,
+        "rmse": 96.46356309361046,
+        "r2": 0.9950681312993046
+      }
+    },
+    {
+      "model": "XGBoost (tuned)",
+      "role": "Primary",
+      "val": {
+        "mae": 57.52488244127423,
+        "rmse": 87.28547041312062,
+        "r2": 0.9952206502787327
+      },
+      "test": {
+        "mae": 66.2434886717151,
+        "rmse": 95.60587406052873,
+        "r2": 0.9951554431166066
+      }
+    },
+    {
+      "model": "Manufacturer power curve",
+      "role": "Reference",
+      "val": {
+        "mae": 130.2049440821073,
+        "rmse": 190.49908750492773,
+        "r2": 0.9772348405605144
+      },
+      "test": {
+        "mae": 100.03807197211685,
+        "rmse": 167.40188623388573,
+        "r2": 0.9851472934244246
+      }
+    }
+  ],
+  "error_targets": {
+    "Beats manufacturer curve on validation": true,
+    "Beats default XGBoost on validation": true
+  },
+  "interval": {
+    "coverage_80": 0.8251502271727978,
+    "mean_width_kw": 207.25711059570312
+  },
+  "importance": [
+    {
+      "feature": "wind_speed",
+      "gain": 474253696.0,
+      "permutation_rmse_increase": 1841.5136813519944
+    },
+    {
+      "feature": "wind_dir_sin",
+      "gain": 1001065.8125,
+      "permutation_rmse_increase": 10.299337051895762
+    },
+    {
+      "feature": "wind_dir_cos",
+      "gain": 337036.875,
+      "permutation_rmse_increase": 4.782561875559307
+    },
+    {
+      "feature": "air_density",
+      "gain": 947552.1875,
+      "permutation_rmse_increase": 6.397245119457975
+    }
+  ]
+}
