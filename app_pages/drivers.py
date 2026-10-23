@@ -8,7 +8,7 @@ import common as c
 import ui
 
 res = ui.results()
-st.title("Weather drivers")
+st.title("Weather drivers", icon=":material/thermostat:")
 st.caption("Which weather variables, and which interactions between them, most influence predicted turbine output.")
 
 # ---------------------------------------------------------------- ablation

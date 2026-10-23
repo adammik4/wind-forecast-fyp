@@ -7,6 +7,7 @@ Follows the CRISP-DM data phases in the interim report (Sections 3.2.2-3.2.3):
   features -> cyclical wind-direction encoding, air density from temperature, pressure and humidity
   split    -> chronological train / validation / test (no data leakage)
 """
+import gzip
 from pathlib import Path
 
 import numpy as np
@@ -45,8 +46,70 @@ FEATURE_LABELS = {
     "temperature_c": "Temperature", "pressure_kpa": "Pressure", "humidity_pct": "Humidity", "air_density": "Air density",
 }
 
-# ---------------------------------------------------------------- Malaysian study sites (NASA POWER hourly)
-SITES = {"Mersing": "Mersing.csv", "Kudat": "kudat.csv"}
+# ---------------------------------------------------------------- Malaysia: one representative site per state
+# Elias, Yi and Jamaludin (2024) screened Global Wind Atlas data (100 m, 250 m grid) and found onshore spots
+# averaging above 7 m/s in these states. NASA POWER's 0.5 x 0.625 degree cells smooth those ridges out, so the
+# speeds here are lower; the paper guides which states to study, NASA POWER gives the hourly record to model.
+PAPER = ("M. A. Elias, L. X. Yi and A. Jamaludin, \"Potential of Onshore Wind Energy in Malaysia: A Brief Study "
+         "on Wind Conditions,\" 2024 IEEE iSPEC. doi:10.1109/iSPEC59716.2024.10892419")
+PAPER_STATES = {"Sabah", "Kedah", "Perlis", "Perak", "Johor", "Pahang", "Kelantan"}
+HOTSPOT_WS = 7.0  # m/s, the paper's threshold for an onshore hotspot
+
+# Johor and Sabah keep the interim report's sites. Every other state uses a coastal town in its windiest
+# NASA POWER cell (2001-2020 WS50M climatology); the inland federal territories use their own cell.
+# households: DOSM 2020 census (data.gov.my hh_profile_state). grid: which utility grid the state draws from.
+STATES = {
+    "Johor": dict(site="Mersing", lat=2.43, lon=103.84, grid="Peninsular", households=1_017_727),
+    "Kedah": dict(site="Kuala Kedah", lat=6.10, lon=100.29, grid="Peninsular", households=528_228),
+    "Kelantan": dict(site="Kota Bharu", lat=6.13, lon=102.24, grid="Peninsular", households=363_251),
+    "Melaka": dict(site="Melaka", lat=2.19, lon=102.25, grid="Peninsular", households=267_074),
+    "Negeri Sembilan": dict(site="Port Dickson", lat=2.52, lon=101.80, grid="Peninsular", households=315_497),
+    "Pahang": dict(site="Kuala Rompin", lat=2.81, lon=103.49, grid="Peninsular", households=401_534),
+    "Perak": dict(site="Lumut", lat=4.23, lon=100.63, grid="Peninsular", households=672_855),
+    "Perlis": dict(site="Kuala Perlis", lat=6.40, lon=100.13, grid="Peninsular", households=80_850),
+    "Pulau Pinang": dict(site="Balik Pulau", lat=5.35, lon=100.24, grid="Peninsular", households=495_347),
+    "Sabah": dict(site="Kudat", lat=6.88, lon=116.84, grid="Sabah", households=728_201),
+    "Sarawak": dict(site="Miri", lat=4.40, lon=113.99, grid="Sarawak", households=618_108),
+    "Selangor": dict(site="Port Klang", lat=3.00, lon=101.39, grid="Peninsular", households=1_836_410),
+    "Terengganu": dict(site="Kuala Terengganu", lat=5.33, lon=103.14, grid="Peninsular", households=282_373),
+    "Kuala Lumpur": dict(site="Kuala Lumpur", lat=3.14, lon=101.69, grid="Peninsular", households=573_529, territory=True),
+    "Labuan": dict(site="Labuan", lat=5.28, lon=115.24, grid="Sabah", households=23_961, territory=True),
+    "Putrajaya": dict(site="Putrajaya", lat=2.93, lon=101.69, grid="Peninsular", households=29_699, territory=True),
+}
+STATE_OF = {s["site"]: state for state, s in STATES.items()}
+STATES_GEOJSON = DATA_DIR / "malaysia_states.geojson"
+
+# Value creation. Grid emission factors: Energy Commission, GEF in Malaysia 2022 (t CO2e per MWh; Labuan is on
+# the Sabah grid). Household use: DOSM domestic electricity consumption 2023 over 2020 census households.
+GRID_EMISSION_FACTOR = {"Peninsular": 0.769, "Sabah": 0.531, "Sarawak": 0.199}
+DOMESTIC_GWH_2023 = 40_620
+KWH_PER_HOUSEHOLD = DOMESTIC_GWH_2023 * 1e6 / sum(s["households"] for s in STATES.values())  # about 4,900 kWh a year
+
+# Study sites with a trained 24 h outlook: the interim report's two, two from the paper's states, and one more
+# state outside the paper's list (Sarawak, the windiest of those after the Labuan federal territory).
+SITES = {
+    "Mersing": "Interim report site",
+    "Kudat": "Interim report site",
+    "Kuala Rompin": "From the IEEE iSPEC 2024 paper",
+    "Kuala Kedah": "From the IEEE iSPEC 2024 paper",
+    "Miri": "Additional state",
+}
+_ORIGINAL_FILES = {"Mersing": "Mersing.csv", "Kudat": "kudat.csv"}
+
+
+def slug(site: str) -> str:
+    return site.replace(" ", "")
+
+
+def site_file(site: str) -> Path:
+    if site in _ORIGINAL_FILES:
+        return DATA_DIR / _ORIGINAL_FILES[site]
+    return DATA_DIR / "sites" / f"{slug(site)}.csv.gz"
+
+
+# Accuracy target: normalised error within 10 to 15 %. 15 % is the pass mark, 10 % the stretch goal.
+ERROR_TARGET, ERROR_STRETCH = 0.15, 0.10
+
 TARGET = "WS50M"  # wind speed at 50 m, closest to turbine hub height
 HORIZONS = list(range(1, 25))  # hours ahead; one XGBoost model per horizon
 VAL_START = pd.Timestamp("2023-01-01")
@@ -69,7 +132,7 @@ def predict(booster: xgb.Booster, X: pd.DataFrame) -> np.ndarray:
 # ---------------------------------------------------------------- loading
 def read_nasa_csv(path: Path) -> pd.DataFrame:
     """NASA POWER CSV export: skip the -BEGIN HEADER- ... -END HEADER- block, index by timestamp."""
-    with open(path, encoding="utf-8") as fh:
+    with (gzip.open if path.suffix == ".gz" else open)(path, "rt", encoding="utf-8") as fh:
         header_rows = next(i for i, line in enumerate(fh) if line.startswith("-END HEADER-")) + 1
     df = pd.read_csv(path, skiprows=header_rows)
     df.index = pd.to_datetime(dict(year=df.YEAR, month=df.MO, day=df.DY, hour=df.HR))
@@ -78,7 +141,7 @@ def read_nasa_csv(path: Path) -> pd.DataFrame:
 
 
 def load_nasa(site: str) -> pd.DataFrame:
-    return read_nasa_csv(DATA_DIR / SITES[site]).interpolate(method="time", limit=3)
+    return read_nasa_csv(site_file(site)).interpolate(method="time", limit=3)
 
 
 def load_t1() -> pd.DataFrame:

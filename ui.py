@@ -3,11 +3,15 @@ import json
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import common as c
 
-BLUE, ORANGE, GREY, GREEN, RED = "#2a6fdb", "#e8710a", "#8a8f98", "#1e8e3e", "#d93025"
+ASSETS = c.ROOT / "assets"
+BLUE, ORANGE, GREY, GREEN, RED, TEAL = "#2563EB", "#EA580C", "#94A3B8", "#15803D", "#DC2626", "#0E7490"
+BAND = "rgba(234,88,12,0.16)"  # P10-P90 fill, ORANGE at low opacity
+TEAL_SCALE = ["#ECFEFF", "#A5F3FC", "#22D3EE", "#0891B2", "#0E7490", "#164E63"]
 
 
 # ---------------------------------------------------------------- data and models
@@ -60,9 +64,11 @@ def apply_cut_out(wind_speed, power):
 
 
 @st.cache_data
-def site_power(site: str) -> pd.DataFrame:
-    """Estimated hourly output if the T1 turbine stood at a Malaysian site, from its NASA POWER weather."""
+def site_power(site: str, wind_scale: float = 1.0) -> pd.DataFrame:
+    """Estimated hourly output if the T1 turbine stood at a Malaysian site, from its NASA POWER weather.
+    wind_scale multiplies every hourly wind speed (hotspot scenario); 1 is the recorded wind."""
     df = c.load_nasa(site).dropna(subset=["WS50M", "WD10M", "T2M", "PS", "RH2M"])
+    df = df.assign(WS50M=df.WS50M * wind_scale)
     X = c.site_power_inputs(df)
     q = predict_interval(X)
     out = pd.DataFrame({"wind_speed": X.wind_speed, "air_density": X.air_density, "power_kw": predict_power(X),
@@ -70,6 +76,49 @@ def site_power(site: str) -> pd.DataFrame:
     for col in ("power_kw", "p10", "p90"):
         out[col] = apply_cut_out(out.wind_speed, out[col])
     return out
+
+
+@st.cache_data(show_spinner="Estimating wind output for all 16 states...")
+def state_table(hotspot: bool = False) -> pd.DataFrame:
+    """One row per state: wind and estimated output of one T1 turbine at its representative site (full years only).
+    hotspot=True rescales the paper's states so their mean wind is the paper's hotspot speed, keeping the hourly pattern."""
+    rows = []
+    for state, s in c.STATES.items():
+        scale = 1.0
+        if hotspot and state in c.PAPER_STATES:
+            ws = c.load_nasa(s["site"]).WS50M
+            scale = c.HOTSPOT_WS / ws[ws.index.year < ws.index.max().year].mean()
+        est = site_power(s["site"], scale)
+        est = est[est.index.year < est.index.max().year]
+        monthly = est.groupby(est.index.month).power_kw.mean()
+        rows.append(dict(
+            state=state, site=s["site"], lat=s["lat"], lon=s["lon"], grid=s["grid"], households=s["households"],
+            territory=s.get("territory", False), paper=state in c.PAPER_STATES, study=s["site"] in c.SITES,
+            wind_speed=est.wind_speed.mean(), above_cut_in=(est.wind_speed >= c.CUT_IN).mean(),
+            mean_kw=est.power_kw.mean(), p10_kw=est.p10.mean(), p90_kw=est.p90.mean(),
+            monthly_kw=monthly.reindex(range(1, 13)).tolist(),
+        ))
+    df = pd.DataFrame(rows)
+    df["capacity_factor"] = df.mean_kw / c.RATED_KW
+    df["emission_factor"] = df.grid.map(c.GRID_EMISSION_FACTOR)
+    return df
+
+
+def contribution(table: pd.DataFrame, turbines: int) -> pd.DataFrame:
+    """Annual value of a wind farm of `turbines` T1 machines in each state (before wake and availability losses)."""
+    out = table.copy()
+    hours = 8766  # average year
+    for col, src in (("energy_gwh", "mean_kw"), ("energy_gwh_p10", "p10_kw"), ("energy_gwh_p90", "p90_kw")):
+        out[col] = out[src] * turbines * hours / 1e6
+    out["homes"] = out.energy_gwh * 1e6 / c.KWH_PER_HOUSEHOLD
+    out["home_share"] = out.homes / out.households
+    out["co2_kt"] = out.energy_gwh * out.emission_factor  # GWh x t/MWh = kt
+    return out
+
+
+@st.cache_data
+def states_geojson() -> dict:
+    return json.loads(c.STATES_GEOJSON.read_text())
 
 
 @st.cache_data
@@ -92,6 +141,7 @@ def typical_conditions() -> dict[str, dict]:
 
 def require_models():
     needed = ["power_xgb.json", "power_quantile.json", "power_results.json", "tuning_trials.csv", "metrics.csv"]
+    needed += [f"{c.slug(site)}/h24.json" for site in c.SITES]
     missing = [f for f in needed if not (c.MODEL_DIR / f).exists()]
     if missing:
         st.error(f"Missing trained models ({', '.join(missing)}). Run `python train.py` in the project folder first.")
@@ -116,33 +166,62 @@ def rotor_rpm(wind_speed: float, running: bool) -> float:
 
 
 def turbine_svg(rpm: float, wind_dir: float, colour: str) -> str:
-    """Animated turbine. Blade rotation speed follows the rotor rpm (shown 3x faster so it reads on screen)."""
+    """Animated turbine and wind-direction compass as one standalone SVG, for st.image (st.html strips SVG).
+    Blade rotation speed follows the rotor rpm (shown 3x faster so it reads on screen)."""
     period = 60 / (3 * rpm) if rpm > 0 else 0
     spin = f"animation: rotor-spin {period:.2f}s linear infinite;" if period else ""
     blade = "M0,-4 C6,-30 5,-80 0,-100 C-3,-80 -4,-30 0,-4 Z"
-    return f"""
-<style>
-  @keyframes rotor-spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
-  .rotor {{ transform-box: fill-box; transform-origin: center; {spin} }}
-</style>
-<div style="display:flex;justify-content:center;gap:24px;align-items:flex-end">
-<svg viewBox="-120 -120 240 360" width="220" height="330" role="img" aria-label="Wind turbine, rotor at {rpm:.0f} rpm">
-  <polygon points="-5,0 5,0 9,235 -9,235" fill="#9aa3ad"/>
-  <rect x="-16" y="-9" width="40" height="16" rx="6" fill="#7d8792"/>
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="-120 -120 345 360" width="345" height="360">
+  <style>
+    @keyframes rotor-spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
+    .rotor {{ transform-origin: 0px 0px; {spin} }}
+  </style>
+  <polygon points="-5,0 5,0 9,235 -9,235" fill="#94A3B8"/>
+  <rect x="-16" y="-9" width="40" height="16" rx="6" fill="#64748B"/>
   <g class="rotor">
-    <circle cx="0" cy="0" r="104" fill="none"/>
-    <path d="{blade}" fill="#c3c9d0" stroke="#7d8792" stroke-width="1"/>
-    <path d="{blade}" fill="#c3c9d0" stroke="#7d8792" stroke-width="1" transform="rotate(120)"/>
-    <path d="{blade}" fill="#c3c9d0" stroke="#7d8792" stroke-width="1" transform="rotate(240)"/>
+    <path d="{blade}" fill="#CBD5E1" stroke="#64748B" stroke-width="1"/>
+    <path d="{blade}" fill="#CBD5E1" stroke="#64748B" stroke-width="1" transform="rotate(120)"/>
+    <path d="{blade}" fill="#CBD5E1" stroke="#64748B" stroke-width="1" transform="rotate(240)"/>
   </g>
   <circle cx="0" cy="0" r="8" fill="{colour}"/>
-</svg>
-<svg viewBox="-50 -50 100 100" width="90" height="90" role="img" aria-label="Wind from {wind_dir:.0f} degrees">
-  <circle r="44" fill="none" stroke="#9aa3ad" stroke-width="2"/>
-  <text y="-30" text-anchor="middle" font-size="12" fill="#8a8f98">N</text>
-  <g transform="rotate({wind_dir:.0f})">
-    <line x1="0" y1="-38" x2="0" y2="18" stroke="{colour}" stroke-width="4"/>
-    <polygon points="0,28 -9,12 9,12" fill="{colour}"/>
+  <g transform="translate(170,185)">
+    <circle r="44" fill="none" stroke="#94A3B8" stroke-width="2"/>
+    <text y="-28" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" fill="#94A3B8">N</text>
+    <g transform="rotate({wind_dir:.0f})">
+      <line x1="0" y1="-38" x2="0" y2="18" stroke="{colour}" stroke-width="4"/>
+      <polygon points="0,28 -9,12 9,12" fill="{colour}"/>
+    </g>
   </g>
-</svg>
-</div>"""
+</svg>"""
+
+
+# ---------------------------------------------------------------- 10-15 % accuracy target
+def target_band(fig):
+    """Shade the 10-15 % target band (y axis in percent)."""
+    lo, hi = c.ERROR_STRETCH * 100, c.ERROR_TARGET * 100
+    fig.add_hrect(y0=0, y1=lo, fillcolor=GREEN, opacity=0.08, line_width=0)
+    fig.add_hrect(y0=lo, y1=hi, fillcolor=GREEN, opacity=0.16, line_width=0,
+                  annotation_text=f"target {lo:.0f}-{hi:.0f}%", annotation_position="top right")
+    return fig
+
+
+def target_chart(ms: pd.DataFrame, height=300):
+    """One site's normalised outlook errors by horizon against the 10-15 % target."""
+    fig = go.Figure()
+    fig.add_scatter(x=ms.horizon, y=ms.wind_nmae * 100, name="Wind speed nMAE (% of mean wind)",
+                    line=dict(color=ORANGE, width=3))
+    fig.add_scatter(x=ms.horizon, y=ms.power_nrmse * 100, name="Power nRMSE (% of rated)", line=dict(color=TEAL, width=3))
+    fig.update_xaxes(title="Forecast horizon (hours ahead)")
+    return style(target_band(fig), "Normalised error (%)", height)
+
+
+def within(errors: pd.Series, limit: float) -> int:
+    """Longest horizon, counted from +1 h, for which every error up to it is within the limit."""
+    return int((errors.to_numpy() <= limit).cumprod().sum())
+
+
+def target_summary(ms: pd.DataFrame) -> str:
+    h15, h10 = within(ms.wind_nmae, c.ERROR_TARGET), within(ms.wind_nmae, c.ERROR_STRETCH)
+    return (f"Wind-speed error is within {c.ERROR_TARGET:.0%} up to +{h15} h and within {c.ERROR_STRETCH:.0%} up to +{h10} h "
+            f"(+24 h: {ms.wind_nmae.iloc[-1]:.0%}). As a share of rated power, the power error peaks at "
+            f"{ms.power_nrmse.max():.1%}, inside the target at every horizon.")

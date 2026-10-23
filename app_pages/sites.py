@@ -1,4 +1,4 @@
-"""Study sites (report Section 1.4): estimated generation at Mersing and Kudat, and a 24 h power outlook."""
+"""Study sites (report Section 1.4): estimated generation at the five Malaysian sites, and a 24 h power outlook."""
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,13 +7,15 @@ import streamlit as st
 import common as c
 import ui
 
-st.title("Mersing and Kudat")
+st.title("Study sites", icon=":material/location_on:")
 st.caption(
     "What the same 3.6 MW turbine would produce in Malaysia's marginal wind corridors, using NASA POWER (MERRA-2) "
-    "hourly weather from 2015 onwards. Treat this as a site comparison, not a yield assessment: the wind is "
-    "at 50 m from a 0.5° reanalysis grid, which smooths out gusts and local terrain effects."
+    "hourly weather from 2015 onwards. Treat this as a site comparison, not a yield assessment: the wind is at 50 m from a "
+    "0.5° reanalysis grid, which smooths out gusts and local terrain effects."
 )
 site = st.segmented_control("Site", list(c.SITES), default="Mersing", required=True, key="site")
+state = c.STATE_OF[site]
+st.markdown(f":violet-badge[:material/location_on: {state}]")
 
 est = ui.site_power(site)
 full_years = est[est.index.year < est.index.max().year]
@@ -41,7 +43,7 @@ with left, st.container(border=True):
                 error_y=dict(type="data", symmetric=False, array=(monthly.p90 - monthly.cf) / c.RATED_KW * 100,
                              arrayminus=(monthly.cf - monthly.p10) / c.RATED_KW * 100, color=ui.GREY))
     fig.add_scatter(x=months, y=monthly.ws, name="Mean wind speed (m/s)", yaxis="y2", line=dict(color=ui.BLUE))
-    fig.update_layout(yaxis2=dict(overlaying="y", side="right", title="m/s", showgrid=False))
+    fig.update_layout(yaxis2=dict(overlaying="y", side="right", title="m/s", showgrid=False, tickformat=".1f"))
     st.plotly_chart(ui.style(fig, "Capacity factor (%)", 340), width="stretch")
     st.caption("Error bars: mean P10 and P90. The north-east monsoon (roughly Nov to Mar) carries most of the output.")
 
@@ -80,7 +82,7 @@ if row.isna().all(axis=None):
     st.warning("No weather data at this time.")
     st.stop()
 
-ws_fc = pd.Series({origin + pd.Timedelta(hours=h): float(c.predict(ui.booster(str(c.MODEL_DIR / site / f"h{h:02d}.json")), row)[0])
+ws_fc = pd.Series({origin + pd.Timedelta(hours=h): float(c.predict(ui.booster(str(c.MODEL_DIR / c.slug(site) / f"h{h:02d}.json")), row)[0])
                    for h in c.HORIZONS})
 o = df.loc[origin]
 q = ui.predict_interval(c.power_features(ws_fc.clip(lower=0).to_numpy(), o.WD10M, o.T2M, o.PS, o.RH2M))
@@ -101,7 +103,7 @@ with st.container(border=True):
 
     fig = go.Figure()
     fig.add_scatter(x=ws_fc.index, y=q[:, 2], line=dict(width=0), showlegend=False, hoverinfo="skip")
-    fig.add_scatter(x=ws_fc.index, y=q[:, 0], line=dict(width=0), fill="tonexty", fillcolor="rgba(232,113,10,0.18)", name="80% interval")
+    fig.add_scatter(x=ws_fc.index, y=q[:, 0], line=dict(width=0), fill="tonexty", fillcolor=ui.BAND, name="80% interval")
     fig.add_scatter(x=ws_fc.index, y=q[:, 1], name="Forecast power (P50)", line=dict(color=ui.ORANGE, width=3))
     fig.add_scatter(x=actual_power.index, y=actual_power, name="Power from actual weather", line=dict(color=ui.BLUE, dash="dot"))
     power_col.plotly_chart(ui.style(fig, "Power (kW)", 340), width="stretch")
@@ -112,13 +114,15 @@ with st.container(border=True):
         if len(actual):
             st.metric("Wind speed MAE over this window", f"{(ws_fc.loc[actual.index] - actual).abs().mean():.2f} m/s", border=True)
 
-with st.expander("Wind-speed outlook accuracy by horizon (test set, 2024 onwards)"):
+with st.expander("Wind-speed outlook accuracy by horizon (test set, 2024 onwards)", icon=":material/insights:"):
     m = ui.outlook_metrics()
     ms = m[m.site == site]
+    left, right = st.columns(2)
     fig = go.Figure()
     fig.add_scatter(x=ms.horizon, y=ms.xgb_rmse, name="XGBoost", line=dict(color=ui.ORANGE, width=3))
     fig.add_scatter(x=ms.horizon, y=ms.persistence_rmse, name="Persistence (same as now)", line=dict(color=ui.GREY, dash="dash"))
     fig.update_xaxes(title="Forecast horizon (hours ahead)")
-    st.plotly_chart(ui.style(fig, "Test RMSE (m/s)", 300), width="stretch")
+    left.plotly_chart(ui.style(fig, "Test RMSE (m/s)", 300), width="stretch")
+    right.plotly_chart(ui.target_chart(ms, 300), width="stretch")
     st.caption(f"Skill over persistence: {ms.skill.iloc[0]:+.0%} at +1 h, {ms.skill.iloc[5]:+.0%} at +6 h, "
-               f"{ms.skill.iloc[-1]:+.0%} at +24 h.")
+               f"{ms.skill.iloc[-1]:+.0%} at +24 h. " + ui.target_summary(ms))

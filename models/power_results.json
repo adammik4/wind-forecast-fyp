@@ -163,7 +163,7 @@
     {
       "method": "Grid",
       "trials": 27,
-      "seconds": 5.61590059986338,
+      "seconds": 5.920192700228654,
       "best_val_rmse": 87.28547041312062,
       "test": {
         "mae": 66.2434886717151,
@@ -180,7 +180,7 @@
     {
       "method": "Random",
       "trials": 30,
-      "seconds": 47.95138079999015,
+      "seconds": 46.67690689989831,
       "best_val_rmse": 92.31563414149501,
       "test": {
         "mae": 71.92109040509119,
@@ -200,7 +200,7 @@
     {
       "method": "Bayesian",
       "trials": 30,
-      "seconds": 31.203579899854958,
+      "seconds": 33.253472800017335,
       "best_val_rmse": 91.76425180570709,
       "test": {
         "mae": 70.3753945089079,
@@ -327,7 +327,14 @@
   ],
   "error_targets": {
     "Beats manufacturer curve on validation": true,
-    "Beats default XGBoost on validation": true
+    "Beats default XGBoost on validation": true,
+    "Test nRMSE within 15% of rated power": true,
+    "Test nRMSE within 10% of rated power (stretch)": true
+  },
+  "normalised_error": {
+    "nrmse": 0.02655718723903576,
+    "nmae": 0.018400969075476416,
+    "rmse_over_mean": 0.05601286117477672
   },
   "interval": {
     "coverage_80": 0.8251502271727978,

@@ -2,7 +2,7 @@
 
     python train.py            # everything
     python train.py power      # turbine power model only (Objectives 1 and 2)
-    python train.py outlook    # 24 h wind-speed outlook models for Mersing and Kudat only
+    python train.py outlook    # 24 h wind-speed outlook models for the five Malaysian study sites only
 
 Writes to models/:
   power_xgb.json          tuned XGBoost power model (point forecast)
@@ -10,7 +10,7 @@ Writes to models/:
   power_results.json      cleaning, ablation, tuning, baseline comparison, importance, interval coverage
   tuning_trials.csv       every grid / random / Bayesian trial
   <site>/h01..h24.json    wind-speed outlook, one model per horizon
-  metrics.csv             outlook test scores vs persistence
+  metrics.csv             outlook test scores vs persistence, plus normalised errors for the 10-15 % target
 """
 import itertools
 import json
@@ -257,11 +257,15 @@ def train_power():
     tuned_val = evaluate(model, d, features)["val"]["rmse"]
     default_val = next(r for r in comparison if r["model"] == "XGBoost (default)")["val"]["rmse"]
     curve_val = next(r for r in comparison if r["model"] == "Manufacturer power curve")["val"]["rmse"]
+    test = evaluate(model, d, features)["test"]
+    nrmse, nmae = test["rmse"] / c.RATED_KW, test["mae"] / c.RATED_KW
     targets = {
         "Beats manufacturer curve on validation": tuned_val < curve_val,
         "Beats default XGBoost on validation": tuned_val < default_val,
+        f"Test nRMSE within {c.ERROR_TARGET:.0%} of rated power": nrmse <= c.ERROR_TARGET,
+        f"Test nRMSE within {c.ERROR_STRETCH:.0%} of rated power (stretch)": nrmse <= c.ERROR_STRETCH,
     }
-    print("Error targets:", targets)
+    print("Error targets:", targets, f"nRMSE {nrmse:.1%}, nMAE {nmae:.1%}")
 
     # Uncertainty: one model, three quantiles, same tuned hyperparameters.
     qmodel = fit_xgb(d, params, features, objective="reg:quantileerror", quantile_alpha=np.array([0.1, 0.5, 0.9]))
@@ -281,16 +285,26 @@ def train_power():
         split={k: dict(rows=int(m.sum()), start=str(d.df.index[m].min()), end=str(d.df.index[m].max())) for k, m in d.mask.items()},
         training_range={f: [float(d.df[f].min()), float(d.df[f].max())] for f in c.POWER_FEATURES},
         ablation=abl, tuning=tuning, best_method=best["method"], params=params, comparison=comparison,
-        error_targets=targets, interval=interval, importance=importance,
+        error_targets=targets, normalised_error=dict(nrmse=nrmse, nmae=nmae, rmse_over_mean=test["rmse"] / d.y["test"].mean()),
+        interval=interval, importance=importance,
     )
     (c.MODEL_DIR / "power_results.json").write_text(json.dumps(results, indent=2))
 
 
-# ---------------------------------------------------------------- 24 h wind-speed outlook (Mersing, Kudat)
-def train_wind_speed(site: str) -> list[dict]:
+# ---------------------------------------------------------------- 24 h wind-speed outlook (Malaysian study sites)
+def site_power(booster, features, df: pd.DataFrame) -> np.ndarray:
+    """Power-model output (kW) for NASA POWER weather rows, with the cut-out rule; NaN where weather is missing."""
+    X = c.site_power_inputs(df)
+    ok = X.notna().all(axis=1).to_numpy()
+    out = np.full(len(X), np.nan)
+    out[ok] = np.clip(c.predict(booster, X.loc[ok, features]), 0, c.RATED_KW)
+    return np.where(X.wind_speed.to_numpy() >= c.CUT_OUT, 0.0, out)
+
+
+def train_wind_speed(site: str, power_booster, power_feats) -> list[dict]:
     df = c.load_nasa(site)
     X = c.make_features(df).iloc[48:]  # first rows lack the 48h lag
-    out_dir = c.MODEL_DIR / site
+    out_dir = c.MODEL_DIR / c.slug(site)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for h in c.HORIZONS:
@@ -305,23 +319,36 @@ def train_wind_speed(site: str) -> list[dict]:
         model = XGB(PARAMS, rounds=1000, early_stop=30).fit(X[train], y[train], X[val], y[val])
         model.booster.save_model(out_dir / f"h{h:02d}.json")
 
-        xgb = scores(y[test], model.predict(X[test]))
+        fc = model.predict(X[test])
+        xgb = scores(y[test], fc)
         pers = scores(y[test], X.loc[test, c.TARGET])  # persistence: "same as now"
+        # Power outlook error: forecast wind through the power model (direction, T, P, RH held at the origin,
+        # as in the app) against the power model driven by the weather that actually occurred.
+        origin = df.loc[X.index[test.to_numpy()]].assign(WS50M=np.clip(fc, 0, None))
+        p_fc = site_power(power_booster, power_feats, origin)
+        p_act = site_power(power_booster, power_feats, df.reindex(t_target[test.to_numpy()]))
+        e = p_fc - p_act
+        e = e[~np.isnan(e)]
         rows.append(
             dict(
                 site=site, horizon=h, n_test=int(test.sum()), best_iteration=int(model.best_iteration),
                 **{f"xgb_{k}": v for k, v in xgb.items()},
                 **{f"persistence_{k}": v for k, v in pers.items()},
                 skill=1 - xgb["rmse"] / pers["rmse"],
+                wind_nmae=xgb["mae"] / y[test].mean(),  # MAE as a share of the mean observed wind speed
+                power_nrmse=float(np.sqrt(np.mean(e ** 2))) / c.RATED_KW,  # RMSE as a share of rated power
             )
         )
-        print(f"{site} +{h:>2}h  RMSE {xgb['rmse']:.3f} vs persistence {pers['rmse']:.3f}  (skill {rows[-1]['skill']:+.1%})")
+        print(f"{site} +{h:>2}h  RMSE {xgb['rmse']:.3f} vs persistence {pers['rmse']:.3f}  (skill {rows[-1]['skill']:+.1%})"
+              f"  wind nMAE {rows[-1]['wind_nmae']:.1%}  power nRMSE {rows[-1]['power_nrmse']:.1%}")
     return rows
 
 
 def train_outlook():
     c.MODEL_DIR.mkdir(exist_ok=True)
-    all_rows = [r for site in c.SITES for r in train_wind_speed(site)]
+    power_booster = c.load_booster(c.MODEL_DIR / "power_xgb.json")  # written by train_power()
+    power_feats = json.loads((c.MODEL_DIR / "power_results.json").read_text())["features"]
+    all_rows = [r for site in c.SITES for r in train_wind_speed(site, power_booster, power_feats)]
     pd.DataFrame(all_rows).to_csv(c.MODEL_DIR / "metrics.csv", index=False)
 
 
