@@ -1,4 +1,4 @@
-"""Study sites (report Section 1.4): estimated generation at the five Malaysian sites, and a 24 h power outlook."""
+"""Study sites (report Section 1.4): estimated generation at the four Malaysian sites, and a 24 h power outlook."""
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -19,15 +19,15 @@ st.markdown(f":violet-badge[:material/location_on: {state}]")
 
 est = ui.site_power(site)
 full_years = est[est.index.year < est.index.max().year]
-yearly = full_years.power_kw.resample("YE").mean()
+yearly = full_years.power_kw.resample("YE").mean() / c.RATED_KW
 
 with st.container(horizontal=True):
     st.metric("Mean wind speed at 50 m", f"{est.wind_speed.mean():.1f} m/s", border=True)
     st.metric("Hours below cut-in", f"{(est.wind_speed < c.CUT_IN).mean():.0%}", border=True,
               help=f"Wind under {c.CUT_IN:.0f} m/s: the rotor is idle.")
     st.metric("Estimated capacity factor", f"{est.power_kw.mean() / c.RATED_KW:.1%}", border=True,
-              chart_data=(yearly / c.RATED_KW * 100).round(1).tolist(), chart_type="bar",
-              help="Mean predicted output divided by rated power. Bars: one per full year.")
+              help=f"Mean predicted output divided by rated power. Full years range from {yearly.min():.1%} "
+                   f"({yearly.idxmin().year}) to {yearly.max():.1%} ({yearly.idxmax().year}).")
     st.metric("Estimated annual energy", f"{est.power_kw.mean() * 8.766:,.0f} MWh", border=True,
               help="Mean predicted output × 8,766 h. For comparison, the training site (Yalova, Turkey) "
                    f"averaged {ui.t1_data().power_kw.mean():,.0f} kW in 2018 (cleaned SCADA).")

@@ -29,7 +29,8 @@ st.caption(
 controls, view = st.columns([1, 2], gap="large")
 with controls:
     with st.container(border=True):
-        st.segmented_control("Load typical weather", list(PRESETS), key="preset", on_change=apply_preset)
+        st.selectbox("Load typical weather", list(PRESETS), index=None, placeholder="Choose a site",
+                     key="preset", on_change=apply_preset)
         st.slider("Wind speed at hub height (m/s)", 0.0, 30.0, step=0.1, key="ws")
         st.slider("Wind direction (degrees, from)", 0.0, 359.0, step=1.0, key="wd")
         st.slider("Air temperature (°C)", -10.0, 45.0, step=0.5, key="temp")
@@ -70,6 +71,14 @@ with view:
         if not lo <= rho <= hi:
             st.warning(f"Air density is outside the training range ({lo:.3f} to {hi:.3f} kg/m³), "
                        "so the model is extrapolating.", icon=":material/warning:")
+        if ss.preset in c.SITES:
+            est = ui.site_power(ss.preset)
+            st.metric(f"{ss.preset} average output, all hours", f"{est.power_kw.mean():,.0f} kW", border=True,
+                      help=f"Mean predicted output over every hour of the site's NASA POWER record, "
+                           f"{est.index.min().year} to {est.index.max().year} "
+                           f"({est.power_kw.mean() / c.RATED_KW:.1%} capacity factor).")
+            st.caption("Higher than at typical weather: output rises steeply with wind speed, "
+                       "so windy hours make up for the calm ones.")
 
 with st.container(border=True):
     st.subheader("Live power curve")

@@ -85,14 +85,12 @@ GRID_EMISSION_FACTOR = {"Peninsular": 0.769, "Sabah": 0.531, "Sarawak": 0.199}
 DOMESTIC_GWH_2023 = 40_620
 KWH_PER_HOUSEHOLD = DOMESTIC_GWH_2023 * 1e6 / sum(s["households"] for s in STATES.values())  # about 4,900 kWh a year
 
-# Study sites with a trained 24 h outlook: the interim report's two, two from the paper's states, and one more
-# state outside the paper's list (Sarawak, the windiest of those after the Labuan federal territory).
+# Study sites with a trained 24 h outlook: the interim report's two and two from the paper's states.
 SITES = {
     "Mersing": "Interim report site",
     "Kudat": "Interim report site",
     "Kuala Rompin": "From the IEEE iSPEC 2024 paper",
     "Kuala Kedah": "From the IEEE iSPEC 2024 paper",
-    "Miri": "Additional state",
 }
 _ORIGINAL_FILES = {"Mersing": "Mersing.csv", "Kudat": "kudat.csv"}
 
@@ -244,6 +242,8 @@ def turbine_status(wind_speed: float, power_kw: float) -> tuple[str, str]:
         return "Cut-out: parked for protection", "red"
     if wind_speed < CUT_IN:
         return "Idle: below cut-in speed", "gray"
+    if power_kw < 1:  # just above cut-in the measured T1 output is still zero
+        return "Idle: too little wind to generate", "gray"
     if power_kw >= 0.95 * RATED_KW:
         return "Rated output", "green"
     return "Generating: partial load", "blue"

@@ -14,7 +14,7 @@ import common as c
 
 NASA_URL = (
     "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=WS10M,WS50M,WD10M,T2M,PS,RH2M"
-    "&community=RE&longitude={lon}&latitude={lat}&start=20150101&end=20260630&format=CSV&time-standard=LST"
+    "&community=RE&longitude={lon}&latitude={lat}&start=20150101&end=20261020&format=CSV&time-standard=LST"
 )
 BOUNDARIES_URL = ("https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/MYS/ADM1/"
                   "geoBoundaries-MYS-ADM1_simplified.geojson")

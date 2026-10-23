@@ -2,7 +2,7 @@
 
     python train.py            # everything
     python train.py power      # turbine power model only (Objectives 1 and 2)
-    python train.py outlook    # 24 h wind-speed outlook models for the five Malaysian study sites only
+    python train.py outlook    # 24 h wind-speed outlook models for the four Malaysian study sites only
 
 Writes to models/:
   power_xgb.json          tuned XGBoost power model (point forecast)
