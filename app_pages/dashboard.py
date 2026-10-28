@@ -110,6 +110,6 @@ with st.container(border=True):
     st.plotly_chart(ui.style(fig, "Active power (kW)", 440), width="stretch")
     st.caption(
         "Temperature, pressure and humidity reach the model through air density; the feature-set ablation on "
-        "the Weather drivers page shows this beats feeding them in raw. Shutdown above cut-out is the turbine's "
+        "the Model evaluation page shows this beats feeding them in raw. Shutdown above cut-out is the turbine's "
         "control logic, applied after the model."
     )

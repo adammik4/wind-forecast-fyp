@@ -91,8 +91,7 @@ with st.container(border=True):
         st.caption(f"Strongest month {best}, weakest {worst}. Plan maintenance for the low months.")
 
 # ---------------------------------------------------------------- all states
-map_col, list_col = st.columns([1, 1], gap="medium")
-with map_col, st.container(border=True):
+with st.container(border=True):
     st.markdown("**Energy a year by state**")
     custom = np.column_stack([table.state, table.site, table.homes, table.capacity_factor * 100])
     fig = go.Figure(go.Choropleth(
@@ -114,16 +113,20 @@ with map_col, st.container(border=True):
         hovertemplate="<b>%{customdata[1]}</b>, %{customdata[0]}<extra></extra>",
     )
     fig.update_geos(
-        fitbounds="locations", projection_type="mercator", resolution=50, showframe=False,
+        # a fixed box about 3.3 times wider than tall, so the map fills the card at 400 px; fitbounds keeps the
+        # world's square frame and leaves a wide card mostly empty
+        lonaxis_range=[97.8, 121.0], lataxis_range=[0.6, 7.6], projection_type="mercator", resolution=50, showframe=False,
         showland=True, landcolor="#1E293B" if dark else "#E9EEF3", showocean=True, oceancolor="#0B1220" if dark else "#F4FAFC",
         showcountries=True, countrycolor="#334155" if dark else "#CBD5E1", showcoastlines=False, bgcolor="rgba(0,0,0,0)",
     )
-    fig.update_layout(height=280, margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+    # static map: geo only pans in "pan" mode, and Streamlit turns dragmode=False into "pan" when on_select is set,
+    # so use a 3D-only mode the map ignores; hover and click-to-select still work
+    fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0), showlegend=False, dragmode="orbit")
     st.plotly_chart(fig, key="state_map", on_select=pick_from_map, selection_mode="points",
                     config=dict(scrollZoom=False, displayModeBar=False))
     st.caption(":orange[★] study sites · click a state to open it")
 
-with list_col, st.container(border=True):
+with st.container(border=True):
     st.markdown("**Study-site states, strongest first**")
     show = table[["state", "site", "wind_speed", "capacity_factor", "energy_gwh", "homes", "co2_kt"]]
     st.dataframe(

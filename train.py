@@ -253,19 +253,23 @@ def train_power():
     comparison = baselines(d, features, params)
 
     model = fit_xgb(d, params, features)
-    model.booster.save_model(c.MODEL_DIR / "power_xgb.json")
     tuned_val = evaluate(model, d, features)["val"]["rmse"]
     default_val = next(r for r in comparison if r["model"] == "XGBoost (default)")["val"]["rmse"]
     curve_val = next(r for r in comparison if r["model"] == "Manufacturer power curve")["val"]["rmse"]
-    test = evaluate(model, d, features)["test"]
-    nrmse, nmae = test["rmse"] / c.RATED_KW, test["mae"] / c.RATED_KW
+    # Flowchart decision step (Figure 4): the targets are checked on validation, before the test set is used.
     targets = {
         "Beats manufacturer curve on validation": tuned_val < curve_val,
         "Beats default XGBoost on validation": tuned_val < default_val,
-        f"Test nRMSE within {c.ERROR_TARGET:.0%} of rated power": nrmse <= c.ERROR_TARGET,
-        f"Test nRMSE within {c.ERROR_STRETCH:.0%} of rated power (stretch)": nrmse <= c.ERROR_STRETCH,
+        f"Validation nRMSE within {c.ERROR_TARGET:.0%} of rated power": tuned_val / c.RATED_KW <= c.ERROR_TARGET,
+        f"Validation nRMSE within {c.ERROR_STRETCH:.0%} of rated power (stretch)": tuned_val / c.RATED_KW <= c.ERROR_STRETCH,
     }
-    print("Error targets:", targets, f"nRMSE {nrmse:.1%}, nMAE {nmae:.1%}")
+    print("Error targets on validation:", targets)
+    if not all(targets.values()):
+        sys.exit("Error targets not met on validation: retune before evaluating on the test set (Figure 4).")
+    model.booster.save_model(c.MODEL_DIR / "power_xgb.json")
+    test = evaluate(model, d, features)["test"]
+    nrmse, nmae = test["rmse"] / c.RATED_KW, test["mae"] / c.RATED_KW
+    print(f"Held-out test: nRMSE {nrmse:.1%}, nMAE {nmae:.1%}")
 
     # Uncertainty: one model, three quantiles, same tuned hyperparameters.
     qmodel = fit_xgb(d, params, features, objective="reg:quantileerror", quantile_alpha=np.array([0.1, 0.5, 0.9]))

@@ -16,12 +16,12 @@ page = st.navigation({
     "Operate": [
         st.Page("app_pages/dashboard.py", title="Power dashboard", icon=":material/wind_power:", default=True),
         st.Page("app_pages/sites.py", title="Study sites", icon=":material/location_on:"),
+        st.Page("app_pages/generation.py", title="Generation by period", icon=":material/bolt:"),
     ],
     "Value for Malaysia": [
         st.Page("app_pages/states.py", title="Contribution by state", icon=":material/map:"),
     ],
     "Analysis": [
-        st.Page("app_pages/drivers.py", title="Weather drivers", icon=":material/thermostat:"),
         st.Page("app_pages/evaluation.py", title="Model evaluation", icon=":material/fact_check:"),
     ],
 })
